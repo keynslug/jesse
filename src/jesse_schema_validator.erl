@@ -77,7 +77,7 @@
               ) -> {ok, jesse:json_term()}
                  | no_return().
 validate(JsonSchema, Value) ->
-  {check_value(Value, unwrap(JsonSchema), JsonSchema), Value}.
+  {check_value(Value, JsonSchema, JsonSchema), Value}.
 
 %% @doc Returns value of "id" field from json object `Schema', assuming that
 %% the given json object has such a field, otherwise an exception
@@ -85,174 +85,104 @@ validate(JsonSchema, Value) ->
 -spec get_schema_id(Schema :: jesse:json_term()) -> string().
 get_schema_id(Schema) ->
   case get_path(?ID, Schema) of
-    [] -> throw({schema_invalid, Schema, missing_id_field});
-    Id -> erlang:binary_to_list(Id)
+    undefined ->
+      throw({schema_invalid, Schema, missing_id_field});
+    Id ->
+      Id
   end.
 
 %% @doc A naive check if the given data is a json object.
-%% Supports two main formats of json representation:
-%% 1) mochijson2 format (`{struct, proplist()}')
-%% 2) jiffy format (`{proplist()}')
-%% 3) jsx format (`[{binary() | atom(), any()}]')
 %% Returns `true' if the given data is an object, otherwise `false' is returned.
 -spec is_json_object(any()) -> boolean().
-is_json_object({struct, Value}) when is_list(Value) -> true;
-is_json_object({Value}) when is_list(Value)         -> true;
-%% handle `jsx' empty objects
-is_json_object([{}])                                -> true;
-%% very naive check. checks only the first element.
-is_json_object([{Key, _Value} | _])
-  when is_binary(Key) orelse is_atom(Key)
-       andalso Key =/= struct                       -> true;
-is_json_object(_)                                   -> false.
+is_json_object(Object) ->
+  jesse_json_medium:is_object(Object).
+
+-spec is_array(any()) -> boolean().
+is_array(Object) ->
+  jesse_json_medium:is_array(Object).
+
+json_size(Object) ->
+  jesse_json_medium:size(Object).
 
 %%% Internal functions
 %% @doc Goes through attributes of the given schema `JsonSchema' and
 %% validates the value `Value' against them.
 %% @private
-check_value(Value, [{?TYPE, Type} | Attrs], JsonSchema) ->
-  check_type(Value, Type, JsonSchema),
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?PROPERTIES, Properties} | Attrs], JsonSchema) ->
-  case is_json_object(Value) of
-    true  -> check_properties(Value, unwrap(Properties));
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value( Value
-           , [{?PATTERNPROPERTIES, PatternProperties} | Attrs]
-           , JsonSchema
-           ) ->
-  case is_json_object(Value) of
-    true  -> check_pattern_properties(Value, PatternProperties);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value( Value
-           , [{?ADDITIONALPROPERTIES, AdditionalProperties} | Attrs]
-           , JsonSchema
-           ) ->
-  case is_json_object(Value) of
-    true  -> check_additional_properties( Value
-                                        , AdditionalProperties
-                                        , JsonSchema
-                                        );
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?ITEMS, Items} | Attrs], JsonSchema) ->
-  case is_array(Value) of
-    true  -> check_items(Value, Items, JsonSchema);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
+check_value(Value, JsonSchema, OwnerSchema) ->
+  jesse_json_medium:foreach(fun (What, Which) ->
+    check_value(Value, What, Which, OwnerSchema) end, JsonSchema).
+
+check_value(Value, ?TYPE, Type, JsonSchema) ->
+  check_type(Value, Type, JsonSchema);
+check_value(Value, ?PROPERTIES, Properties, _JsonSchema) ->
+  is_json_object(Value) andalso
+    check_properties(Value, Properties);
+check_value(Value, ?PATTERNPROPERTIES, PatternProperties, _JsonSchema) ->
+  is_json_object(Value) andalso
+    check_pattern_properties(Value, PatternProperties);
+check_value(Value, ?ADDITIONALPROPERTIES, AdditionalProperties, JsonSchema) ->
+  is_json_object(Value) andalso
+    check_additional_properties(Value, AdditionalProperties, JsonSchema);
+check_value(Value, ?ITEMS, Items, JsonSchema) ->
+  is_array(Value) andalso
+    check_items(Value, Items, JsonSchema);
 %% doesn't really do anything, since this attribute will be handled
 %% by the previous function clause if it's presented in the schema
-check_value( Value
-           , [{?ADDITIONALITEMS, _AdditionalItems} | Attrs]
-           , JsonSchema
-           ) ->
-  check_value(Value, Attrs, JsonSchema);
+check_value(_Value, ?ADDITIONALITEMS, _AdditionalItems, _JsonSchema) ->
+  true;
 %% doesn't really do anything, since this attribute will be handled
 %% by the previous function clause if it's presented in the schema
-check_value(Value, [{?REQUIRED, _Required} | Attrs], JsonSchema) ->
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?DEPENDENCIES, Dependencies} | Attrs], JsonSchema) ->
-  case is_json_object(Value) of
-    true  -> check_dependencies(Value, Dependencies);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?MINIMUM, Minimum} | Attrs], JsonSchema) ->
+check_value(_Value, ?REQUIRED, _Required, _JsonSchema) ->
+  true;
+check_value(Value, ?DEPENDENCIES, Dependencies, _JsonSchema) ->
+  is_json_object(Value) andalso
+    check_dependencies(Value, Dependencies);
+check_value(Value, ?MINIMUM, Minimum, JsonSchema) ->
   case is_number(Value) of
     true  ->
       ExclusiveMinimum = get_path(?EXCLUSIVEMINIMUM, JsonSchema),
       check_minimum(Value, Minimum, ExclusiveMinimum);
     false ->
-      ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?MAXIMUM, Maximum} | Attrs], JsonSchema) ->
+      true
+  end;
+check_value(Value, ?MAXIMUM, Maximum, JsonSchema) ->
   case is_number(Value) of
     true  ->
       ExclusiveMaximum = get_path(?EXCLUSIVEMAXIMUM, JsonSchema),
       check_maximum(Value, Maximum, ExclusiveMaximum);
     false ->
-      ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
+      true
+  end;
 %% doesn't really do anything, since this attribute will be handled
 %% by the previous function clause if it's presented in the schema
-check_value( Value
-           , [{?EXCLUSIVEMINIMUM, _ExclusiveMinimum} | Attrs]
-           , JsonSchema
-           ) ->
-  check_value(Value, Attrs, JsonSchema);
+check_value(_Value, ?EXCLUSIVEMINIMUM, _ExclusiveMinimum, _JsonSchema) ->
+  true;
 %% doesn't really do anything, since this attribute will be handled
 %% by the previous function clause if it's presented in the schema
-check_value( Value
-           , [{?EXCLUSIVEMAXIMUM, _ExclusiveMaximum} | Attrs]
-           , JsonSchema
-           ) ->
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?MINITEMS, MinItems} | Attrs], JsonSchema) ->
-  case is_array(Value) of
-    true  -> check_min_items(Value, MinItems);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?MAXITEMS, MaxItems} | Attrs], JsonSchema) ->
-  case is_array(Value) of
-    true  -> check_max_items(Value, MaxItems);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?UNIQUEITEMS, Uniqueitems} | Attrs], JsonSchema) ->
-  case is_array(Value) of
-    true  -> check_unique_items(Value, Uniqueitems);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?PATTERN, Pattern} | Attrs], JsonSchema) ->
-  case is_binary(Value) of
-    true  -> check_pattern(Value, Pattern);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?MINLENGTH, MinLength} | Attrs], JsonSchema) ->
-  case is_binary(Value) of
-    true  -> check_min_length(Value, MinLength);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?MAXLENGTH, MaxLength} | Attrs], JsonSchema) ->
-  case is_binary(Value) of
-    true  -> check_max_length(Value, MaxLength);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?ENUM, Enum} | Attrs], JsonSchema) ->
-  check_enum(Value, Enum),
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?FORMAT, Format} | Attrs], JsonSchema) ->
-  check_format(Value, Format),
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?DIVISIBLEBY, DivisibleBy} | Attrs], JsonSchema) ->
-  case is_number(Value) of
-    true  -> check_divisible_by(Value, DivisibleBy, JsonSchema);
-    false -> ok
-  end,
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?DISALLOW, Disallow} | Attrs], JsonSchema) ->
-  check_disallow(Value, Disallow, JsonSchema),
-  check_value(Value, Attrs, JsonSchema);
-check_value(Value, [{?EXTENDS, Extends} | Attrs], JsonSchema) ->
-  check_extends(Value, Extends),
-  check_value(Value, Attrs, JsonSchema);
-check_value(_Value, [], _JsonSchema) ->
-  ok;
-check_value(Value, [_Attr | Attrs], JsonSchema) ->
-  check_value(Value, Attrs, JsonSchema).
+check_value(_Value, ?EXCLUSIVEMAXIMUM, _ExclusiveMaximum, _JsonSchema) ->
+  true;
+check_value(Value, ?MINITEMS, MinItems, _JsonSchema) ->
+  is_array(Value) andalso check_min_items(Value, MinItems);
+check_value(Value, ?MAXITEMS, MaxItems, _JsonSchema) ->
+  is_array(Value) andalso check_max_items(Value, MaxItems);
+check_value(Value, ?UNIQUEITEMS, Uniqueitems, _JsonSchema) ->
+  is_array(Value) andalso check_unique_items(Value, Uniqueitems);
+check_value(Value, ?PATTERN, Pattern, _JsonSchema) ->
+  is_binary(Value) andalso check_pattern(Value, Pattern);
+check_value(Value, ?MINLENGTH, MinLength, _JsonSchema) ->
+  is_binary(Value) andalso check_min_length(Value, MinLength);
+check_value(Value, ?MAXLENGTH, MaxLength, _JsonSchema) ->
+  is_binary(Value) andalso check_max_length(Value, MaxLength);
+check_value(Value, ?ENUM, Enum, _JsonSchema) ->
+  check_enum(Value, Enum);
+check_value(Value, ?FORMAT, Format, _JsonSchema) ->
+  check_format(Value, Format);
+check_value(Value, ?DIVISIBLEBY, DivisibleBy, JsonSchema) ->
+  is_number(Value) andalso check_divisible_by(Value, DivisibleBy, JsonSchema);
+check_value(Value, ?DISALLOW, Disallow, JsonSchema) ->
+  check_disallow(Value, Disallow, JsonSchema);
+check_value(Value, ?EXTENDS, Extends, _JsonSchema) ->
+  check_extends(Value, Extends).
 
 %% @doc 5.1.  type
 %%
@@ -305,75 +235,49 @@ check_value(Value, [_Attr | Attrs], JsonSchema) ->
 %%  {"type":["string","number"]}
 %% @private
 check_type(Value, ?STRING, JsonSchema) ->
-  case is_binary(Value) of
-    true  -> ok;
-    false -> throw({data_invalid, Value, not_string, JsonSchema})
-  end;
+  is_binary(Value) orelse throw({data_invalid, Value, not_string, JsonSchema});
 check_type(Value, ?NUMBER, JsonSchema) ->
-  case is_number(Value) of
-    true  -> ok;
-    false -> throw({data_invalid, Value, not_number, JsonSchema})
-  end;
+  is_number(Value) orelse throw({data_invalid, Value, not_number, JsonSchema});
 check_type(Value, ?INTEGER, JsonSchema) ->
-  case is_integer(Value) of
-    true  -> ok;
-    false -> throw({data_invalid, Value, not_integer, JsonSchema})
-  end;
+  is_integer(Value) orelse throw({data_invalid, Value, not_integer, JsonSchema});
 check_type(Value, ?BOOLEAN, JsonSchema) ->
-  case is_boolean(Value) of
-    true  -> ok;
-    false -> throw({data_invalid, Value, not_boolean, JsonSchema})
-  end;
+  is_boolean(Value) orelse throw({data_invalid, Value, not_boolean, JsonSchema});
 check_type(Value, ?OBJECT, JsonSchema) ->
-  case is_json_object(Value) of
-    true  -> ok;
-    false -> throw({data_invalid, Value, not_object, JsonSchema})
-  end;
+  is_json_object(Value) orelse throw({data_invalid, Value, not_object, JsonSchema});
 check_type(Value, ?ARRAY, JsonSchema) ->
-  case is_array(Value) of
-    true  -> ok;
-    false -> throw({data_invalid, Value, not_array, JsonSchema})
-  end;
+  is_array(Value) orelse throw({data_invalid, Value, not_array, JsonSchema});
+check_type(null, ?NULL, _JsonSchema) ->
+  ok;
 check_type(Value, ?NULL, JsonSchema) ->
-  case Value of
-    null -> ok;
-    _    -> throw({data_invalid, Value, not_null, JsonSchema})
-  end;
+  throw({data_invalid, Value, not_null, JsonSchema});
 check_type(_Value, ?ANY, _JsonSchema) ->
   ok;
 check_type(Value, UnionType, JsonSchema) ->
-  case is_array(UnionType) of
-    true  -> check_union_type(Value, UnionType, JsonSchema);
-    false -> ok
-  end.
+  is_array(UnionType) andalso check_union_type(Value, UnionType, JsonSchema).
 
 %% @private
 check_union_type(Value, UnionType, JsonSchema) ->
-  IsValid = lists:any( fun(Type) ->
-                           try
-                             case is_json_object(Type) of
-                               true ->
-                                 %% case when there's a schema in the array,
-                                 %% then we need to validate against
-                                 %% that schema
-                                 ok =:= check_value( Value
-                                                   , unwrap(Type)
-                                                   , Type
-                                                   );
-                               false ->
-                                 ok =:= check_type(Value, Type, JsonSchema)
-                             end
-                           catch
-                             throw:{data_invalid, _, _, _} -> false;
-                             throw:{schema_invalid, _, _}  -> false
-                           end
-                       end
-                     , UnionType
-                     ),
-  case IsValid of
-    true  -> ok;
-    false -> throw({data_invalid, Value, not_correct_type, JsonSchema})
-  end.
+  jesse_json_medium:any( fun(_, Type) ->
+                 try
+                   case is_json_object(Type) of
+                     true ->
+                       %% case when there's a schema in the array,
+                       %% then we need to validate against
+                       %% that schema
+                       check_value(Value, Type, Type),
+                       true;
+                     false ->
+                       check_type(Value, Type, JsonSchema),
+                       true
+                   end
+                 catch
+                   throw:{data_invalid, _, _, _} -> false;
+                   throw:{schema_invalid, _, _}  -> false
+                 end
+             end
+           , UnionType
+           ) orelse
+              throw({data_invalid, Value, not_correct_type, JsonSchema}).
 
 %% @doc 5.2.  properties
 %%
@@ -388,31 +292,25 @@ check_union_type(Value, UnionType, JsonSchema) ->
 %% order of the instance properties MAY be in any order.
 %% @private
 check_properties(Value, Properties) ->
-  lists:foreach( fun({PropertyName, PropertySchema}) ->
-                     case get_path(PropertyName, Value) of
-                       [] ->
+  jesse_json_medium:foreach(fun (Name, Schema) ->
+    check_property(Value, Name, Schema) end, Properties).
+
+check_property(Value, Name, Schema) ->
+  case get_path(Name, Value) of
+    undefined ->
 %% @doc 5.7.  required
 %%
 %% This attribute indicates if the instance must have a value, and not
 %% be undefined.  This is false by default, making the instance
 %% optional.
 %% @end
-                         case get_path(?REQUIRED, PropertySchema) of
-                           true  -> throw({ data_invalid
-                                          , Value
-                                          , missing_required_property
-                                          , PropertyName
-                                          });
-                           _     -> ok
-                         end;
-                       Property -> check_value( Property
-                                               , unwrap(PropertySchema)
-                                               , PropertySchema
-                                               )
-                     end
-                 end
-               , Properties
-               ).
+      case get_path(?REQUIRED, Schema) of
+        true  -> throw({data_invalid, Value, missing_required_property, Name});
+        _     -> ok
+      end;
+    Property ->
+      check_value(Property, Schema, Schema)
+  end.
 
 %% @doc 5.3.  patternProperties
 %%
@@ -425,15 +323,15 @@ check_properties(Value, Properties) ->
 %% schema value.
 %% @private
 check_pattern_properties(Value, PatternProperties) ->
-  [ check_match({PropertyName, PropertyValue}, {Pattern, Schema})
-   || {Pattern, Schema} <- unwrap(PatternProperties),
-      {PropertyName, PropertyValue} <- unwrap(Value)],
-  ok.
+  jesse_json_medium:foreach(fun (PropertyName, PropertyValue) ->
+    jesse_json_medium:foreach(fun (Pattern, Schema) ->
+      check_match(PropertyName, PropertyValue, Pattern, Schema)
+    end, PatternProperties) end, Value).
 
 %% @private
-check_match({PropertyName, PropertyValue}, {Pattern, Schema}) ->
+check_match(PropertyName, PropertyValue, Pattern, Schema) ->
   case re:run(PropertyName, Pattern, [{capture, none}]) of
-    match   -> check_value(PropertyValue, unwrap(Schema), Schema);
+    match   -> check_value(PropertyValue, Schema, Schema);
     nomatch -> ok
   end.
 
@@ -466,7 +364,7 @@ check_additional_properties(Value, AdditionalProperties, JsonSchema) ->
     []     -> ok;
     Extras -> lists:foreach( fun(Extra) ->
                                  check_value( Extra
-                                            , unwrap(AdditionalProperties)
+                                            , AdditionalProperties
                                             , AdditionalProperties
                                             )
                              end
@@ -476,9 +374,9 @@ check_additional_properties(Value, AdditionalProperties, JsonSchema) ->
 
 %% @private
 get_additional_properties(Value, Properties, PatternProperties) ->
-  ValuePropertiesNames  = [Name || {Name, _} <- unwrap(Value)],
-  SchemaPropertiesNames = [Name || {Name, _} <- unwrap(Properties)],
-  Patterns    = [Pattern || {Pattern, _} <- unwrap(PatternProperties)],
+  ValuePropertiesNames  = names_opt(Value),
+  SchemaPropertiesNames = names_opt(Properties),
+  Patterns    = names_opt(PatternProperties),
   ExtraNames0 = lists:subtract(ValuePropertiesNames, SchemaPropertiesNames),
   ExtraNames  = lists:foldl( fun(Pattern, ExtraAcc) ->
                                  filter_extra_names(Pattern, ExtraAcc)
@@ -487,6 +385,11 @@ get_additional_properties(Value, Properties, PatternProperties) ->
                            , Patterns
                            ),
   lists:map(fun(Name) -> get_path(Name, Value) end, ExtraNames).
+
+names_opt(undefined) ->
+  [];
+names_opt(Object) ->
+  jesse_json_medium:names(Object).
 
 %% @private
 filter_extra_names(Pattern, ExtraNames) ->
@@ -519,26 +422,21 @@ filter_extra_names(Pattern, ExtraNames) ->
 check_items(Value, Items, JsonSchema) ->
   case is_json_object(Items) of
     true  ->
-      lists:foreach( fun(Item) ->
-                         check_value(Item, unwrap(Items), Items)
-                     end
-                   , Value
-                   );
+      jesse_json_medium:foreach(fun (_, Item) -> check_value(Item, Items, Items) end, Value);
     false ->
-      case is_list(Items) of
+      case is_array(Items) of
         true  -> check_items_array(Value, Items, JsonSchema);
-        false -> throw({ schema_invalid
-                       , Items
-                       , wrong_type_items
-                       })
+        false -> throw({schema_invalid, Items, wrong_type_items})
       end
   end.
 
 %% @private
 check_items_array(Value, Items, JsonSchema) ->
-  Tuples = case length(Value) - length(Items) of
+  Tuples = case json_size(Value) - json_size(Items) of
              0 ->
-               lists:zip(Value, Items);
+               lists:zip(
+                jesse_json_medium:values(Value),
+                jesse_json_medium:values(Items));
              NExtra when NExtra > 0 ->
 %% @doc 5.6.  additionalItems
 %%
@@ -548,7 +446,7 @@ check_items_array(Value, Items, JsonSchema) ->
 %% be a schema that defines the schema of the additional items.
 %% @end
                case get_path(?ADDITIONALITEMS, JsonSchema) of
-                 [] ->
+                 undefined ->
                    [];
                  true ->
                    [];
@@ -560,7 +458,9 @@ check_items_array(Value, Items, JsonSchema) ->
                          });
                  AdditionalItems ->
                    ExtraSchemas = lists:duplicate(NExtra, AdditionalItems),
-                   lists:zip(Value, lists:append(Items, ExtraSchemas))
+                   lists:zip(
+                    jesse_json_medium:values(Value),
+                    jesse_json_medium:values(Items) ++ ExtraSchemas)
                end;
              NExtra when NExtra < 0 ->
                throw({ data_invalid
@@ -569,11 +469,8 @@ check_items_array(Value, Items, JsonSchema) ->
                      , JsonSchema
                      })
            end,
-  lists:foreach( fun({Item, Schema}) ->
-                     check_value(Item, unwrap(Schema), Schema)
-                 end
-               , Tuples
-               ).
+  lists:foreach(fun({Item, Schema}) ->
+    check_value(Item, Schema, Schema) end, Tuples).
 
 %% @doc 5.8.  dependencies
 %%
@@ -596,30 +493,29 @@ check_items_array(Value, Items, JsonSchema) ->
 %% </dl>
 %% @private
 check_dependencies(Value, Dependencies) ->
-  lists:foreach( fun({DependencyName, DependencyValue}) ->
+  jesse_json_medium:foreach(fun(DependencyName, DependencyValue) ->
                      case get_path(DependencyName, Value) of
-                       [] -> ok;
-                       _  -> check_dependency_value(Value, DependencyValue)
+                       undefined -> ok;
+                       _         -> check_dependency_value(Value, DependencyValue)
                      end
                  end
-               , unwrap(Dependencies)
-               ).
+               , Dependencies).
 
 %% @private
 check_dependency_value(Value, Dependency) when is_binary(Dependency) ->
   case get_path(Dependency, Value) of
-    [] -> throw({ data_invalid
+    undefined -> throw({ data_invalid
                 , Value
                 , missing_dependency
                 , Dependency
                 });
-    _  -> ok
+    _         -> ok
   end;
 check_dependency_value(Value, Dependency) ->
   case is_json_object(Dependency) of
-    true  -> check_value(Value, unwrap(Dependency), Dependency);
+    true  -> check_value(Value, Dependency, Dependency);
     false ->
-      case is_list(Dependency) of
+      case is_array(Dependency) of
         true  -> check_dependency_array(Value, Dependency);
         false -> throw({ schema_invalid
                        , Dependency
@@ -630,7 +526,7 @@ check_dependency_value(Value, Dependency) ->
 
 %% @private
 check_dependency_array(Value, Dependency) ->
-  lists:foreach( fun(PropertyName) ->
+  jesse_json_medium:foreach( fun(_, PropertyName) ->
                      check_dependency_value(Value, PropertyName)
                  end
                , Dependency
@@ -653,14 +549,12 @@ check_minimum(Value, Minimum, ExclusiveMinimum) ->
              true -> Value > Minimum;
              _    -> Value >= Minimum
            end,
-  case Result of
-    true  -> ok;
-    false -> throw({ data_invalid
-                   , Value
-                   , not_in_range
-                   , {{minimum, Minimum}, {exclusive, ExclusiveMinimum}}
-                   })
-  end.
+  Result orelse
+    throw({ data_invalid
+          , Value
+          , not_in_range
+          , {{minimum, Minimum}, {exclusive, ExclusiveMinimum}}
+          }).
 
 %%% @doc 5.10.  maximum
 %%
@@ -679,42 +573,38 @@ check_maximum(Value, Maximum, ExclusiveMaximum) ->
              true -> Value < Maximum;
              _    -> Value =< Maximum
            end,
-  case Result of
-    true  -> ok;
-    false -> throw({ data_invalid
-                   , Value
-                   , not_in_range
-                   , {{maximum, Maximum}, {exclusive, ExclusiveMaximum}}
-                   })
-  end.
+  Result orelse
+    throw({ data_invalid
+          , Value
+          , not_in_range
+          , {{maximum, Maximum}, {exclusive, ExclusiveMaximum}}
+          }).
 
 %% @doc 5.13.  minItems
 %%
 %% This attribute defines the minimum number of values in an array when
 %% the array is the instance value.
 %% @private
-check_min_items(Value, MinItems) when length(Value) >= MinItems ->
-  ok;
 check_min_items(Value, MinItems) ->
-  throw({ data_invalid
-        , Value
-        , not_correct_size
-        , {min_items, MinItems}
-        }).
+  jesse_json_medium:size(Value) >= MinItems orelse
+    throw({ data_invalid
+          , Value
+          , not_correct_size
+          , {min_items, MinItems}
+          }).
 
 %% @doc 5.14.  maxItems
 %%
 %% This attribute defines the maximum number of values in an array when
 %% the array is the instance value.
 %% @private
-check_max_items(Value, MaxItems) when length(Value) =< MaxItems ->
-  ok;
 check_max_items(Value, MaxItems) ->
-  throw({ data_invalid
-        , Value
-        , not_correct_size
-        , {max_items, MaxItems}
-        }).
+  jesse_json_medium:size(Value) =< MaxItems orelse
+    throw({ data_invalid
+          , Value
+          , not_correct_size
+          , {max_items, MaxItems}
+          }).
 
 %% @doc 5.15.  uniqueItems
 %%
@@ -737,30 +627,17 @@ check_max_items(Value, MaxItems) ->
 %%       object.</li>
 %% </ul>
 %% @private
-check_unique_items(Value, true = Uniqueitems) ->
-  lists:foldl( fun(_Item, []) ->
-                   ok;
-                  (Item, RestItems) ->
-                   lists:foreach( fun(ItemFromRest) ->
-                                      case is_equal(Item, ItemFromRest) of
-                                        true  -> throw({ data_invalid
-                                                       , Value
-                                                       , {Item, not_unique}
-                                                       , { uniqueItems
-                                                         , Uniqueitems
-                                                         }
-                                                       });
-                                        false -> ok
-                                      end
-                                  end
-                                , RestItems
-                                ),
-                   tl(RestItems)
-               end
-             , tl(Value)
-             , Value
-             ),
-  ok.
+check_unique_items(Value, true) ->
+  Elems = jesse_json_medium:values(Value),
+  find_unique_items(Elems, Elems).
+
+find_unique_items(_Elems, []) ->
+  true;
+
+find_unique_items(Value, [Item | Rest]) ->
+  lists:any(fun (NextItem) -> is_equal(Item, NextItem) end, Rest) andalso
+    throw({data_invalid, Value, {Item, not_unique}, {uniqueItems, true}}),
+  find_unique_items(Value, Rest).
 
 %% @doc 5.16.  pattern
 %% When the instance value is a string, this provides a regular
@@ -771,11 +648,7 @@ check_unique_items(Value, true = Uniqueitems) ->
 check_pattern(Value, Pattern) ->
   case re:run(Value, Pattern, [{capture, none}]) of
     match   -> ok;
-    nomatch -> throw({ data_invalid
-                     , Value
-                     , no_match
-                     , Pattern
-                     })
+    nomatch -> throw({data_invalid, Value, no_match, Pattern})
   end.
 
 %% @doc 5.17.  minLength
@@ -819,15 +692,11 @@ check_max_length(Value, MaxLength) ->
 %% (Section 5.15).
 %% @private
 check_enum(Value, Enum) ->
-  IsValid = lists:any( fun(ExpectedValue) ->
-                           is_equal(Value, ExpectedValue)
-                       end
-                     , Enum
-                     ),
-  case IsValid of
-    true  -> ok;
-    false -> throw({data_invalid, Value, not_in_enum, Enum})
-  end.
+  jesse_json_medium:any( fun(_, ExpectedValue) ->
+                 is_equal(Value, ExpectedValue)
+             end
+           , Enum) orelse
+              throw({data_invalid, Value, not_in_enum, Enum}).
 
 %% TODO:
 check_format(_Value, _Format) -> ok.
@@ -839,19 +708,12 @@ check_format(_Value, _Format) -> ok.
 %% integer.)  The value of this attribute SHOULD NOT be 0.
 %% @private
 check_divisible_by(_Value, 0, JsonSchema) ->
-  throw({ schema_invalid
-        , JsonSchema
-        , {divide_by, 0}
-        });
+  throw({schema_invalid, JsonSchema, {divide_by, 0}});
 check_divisible_by(Value, DivisibleBy, _JsonSchema) ->
   Result = (Value / DivisibleBy - trunc(Value / DivisibleBy)) * DivisibleBy,
   case Result of
     0.0 -> ok;
-    _   -> throw({ data_invalid
-                 , Value
-                 , not_divisible_by
-                 , DivisibleBy
-                 })
+    _   -> throw({data_invalid, Value, not_divisible_by, DivisibleBy})
   end.
 
 %% @doc 5.25.  disallow
@@ -862,8 +724,8 @@ check_divisible_by(Value, DivisibleBy, _JsonSchema) ->
 %% is not valid.
 %% @private
 check_disallow(Value, Disallow, JsonSchema) ->
-  try check_type(Value, Disallow, []) of
-      ok -> throw({data_invalid, Value, disallowed, JsonSchema})
+  try check_type(Value, Disallow, Disallow) of
+      _ -> throw({data_invalid, Value, disallowed, JsonSchema})
   catch
     throw:{data_invalid, _, _, _} -> ok
   end.
@@ -882,9 +744,9 @@ check_disallow(Value, Disallow, JsonSchema) ->
 check_extends(Value, Extends) ->
   case is_json_object(Extends) of
     true  ->
-      check_value(Value, unwrap(Extends), Extends);
+      check_value(Value, Extends, Extends);
     false ->
-      case is_list(Extends) of
+      case is_array(Extends) of
         true  -> check_extends_array(Value, Extends);
         false -> ok %% TODO: implement handling of $ref
       end
@@ -892,11 +754,8 @@ check_extends(Value, Extends) ->
 
 %% @private
 check_extends_array(Value, Extends) ->
-  lists:foreach( fun(SchemaKey) ->
-                     check_extends(Value, SchemaKey)
-                 end
-               , Extends
-               ).
+  jesse_json_medium:foreach(fun (_, Schema) ->
+    check_extends(Value, Schema) end, Extends).
 
 %%=============================================================================
 %% @doc Returns `true' if given values (instance) are equal, otherwise `false'
@@ -921,18 +780,19 @@ check_extends_array(Value, Extends) ->
 is_equal(Value1, Value2) ->
   case is_json_object(Value1) andalso is_json_object(Value2) of
     true  -> compare_objects(Value1, Value2);
-    false -> case is_list(Value1) andalso is_list(Value2) of
-               true  -> compare_lists(Value1, Value2);
-               false -> Value1 =:= Value2
+    false -> case is_array(Value1) andalso is_array(Value2) of
+               true  -> compare_lists(
+                jesse_json_medium:values(Value1),
+                jesse_json_medium:values(Value2));
+               false ->
+                Value1 =:= Value2
              end
   end.
 
 %% @private
 compare_lists(Value1, Value2) ->
-  case length(Value1) =:= length(Value2) of
-    true  -> compare_elements(Value1, Value2);
-    false -> false
-  end.
+  length(Value1) =:= length(Value2) andalso
+    compare_elements(Value1, Value2).
 
 %% @private
 compare_elements(Value1, Value2) ->
@@ -944,37 +804,25 @@ compare_elements(Value1, Value2) ->
 
 %% @private
 compare_objects(Value1, Value2) ->
-  case length(unwrap(Value1)) =:= length(unwrap(Value2)) of
-    true  -> compare_properties(Value1, Value2);
-    false -> false
+  Length1 = jesse_json_medium:fold(fun (_, _, Count) ->
+    Count + 1 end, 0, Value1),
+  case jesse_json_medium:fold(fun
+    (_Name, _PropertyValue, false) ->
+      false;
+    (Name, PropertyValue, Count) ->
+      is_equal(get_path(Name, Value1), PropertyValue) andalso
+        Count + 1
+    end, 0, Value2) of
+      false ->
+        false;
+      Length2 ->
+        Length1 =:= Length2
   end.
-
-%% @private
-compare_properties(Value1, Value2) ->
-  lists:all( fun({PropertyName1, PropertyValue1}) ->
-                 case get_path(PropertyName1, Value2) of
-                   []             -> false;
-                   PropertyValue2 -> is_equal(PropertyValue1, PropertyValue2)
-                 end
-             end
-           , unwrap(Value1)
-           ).
 
 %%=============================================================================
 %% @private
 get_path(Key, Schema) ->
-  jesse_json_path:path(Key, Schema).
-
-%% @private
-unwrap(Value) ->
-  jesse_json_path:unwrap_value(Value).
-
-%%=============================================================================
-%% @doc This check is needed since objects in `jsx' are lists (proplists)
-%% @private
-is_array(Value) when is_list(Value) -> not is_json_object(Value);
-is_array(_)                         -> false.
-
+  jesse_json_medium:path(Key, Schema).
 
 %%% Local Variables:
 %%% erlang-indent-level: 2

@@ -78,19 +78,19 @@ delete(Key) ->
 %% stored, so, during the next update timestamps will be compared to avoid
 %% unnecessary updates.
 %%
-%% Schema definitions are stored in the format which json parsing function
-%% `ParseFun' returns.
+%% Schema definitions are stored in the format which json parsing medium
+%% accepts.
 %%
 %% NOTE: it's impossible to automatically update schema definitions added by
 %%       add_schema/2, the only way to update them is to use add_schema/2
 %%       again with the new definition.
 -spec update( Path          :: string()
-            , ParseFun      :: fun((binary()) -> jesse:json_term())
+            , JsonMedium    :: module()
             , ValidationFun :: fun((any()) -> boolean())
             , MakeKeyFun    :: fun((jesse:json_term()) -> any())
             ) -> update_result().
-update(Path, ParseFun, ValidationFun, MakeKeyFun) ->
-  Schemas = load_schema(Path, get_updated_files(Path), ParseFun),
+update(Path, JsonMedium, ValidationFun, MakeKeyFun) ->
+  Schemas = load_schema(Path, get_updated_files(Path), JsonMedium),
   store_schema(Schemas, ValidationFun, MakeKeyFun).
 
 %% @doc Reads a schema definition with the same key as `Key' from the internal
@@ -172,25 +172,24 @@ get_updated_files(InDir) ->
   end.
 
 %% @doc Loads schema definitions from a list of files `Files' located in
-%% directory `InDir', and parses each of entry by the given parse
-%% function `ParseFun'.
+%% directory `InDir', and parses each of entry by the given json medium.
 %% @private
-load_schema(InDir, Files, ParseFun) ->
+load_schema(InDir, Files, JsonMedium) ->
   LoadFun = fun(InFile) ->
                 InFilePath      = get_full_path(InDir, InFile),
                 {ok, SchemaBin} = file:read_file(InFilePath),
                 {ok, FileInfo}  = file:read_file_info(InFilePath),
                 TimeStamp       = FileInfo#file_info.mtime,
-                Schema          = try_parse(ParseFun, SchemaBin),
+                Schema          = try_parse(JsonMedium, SchemaBin),
                 {InFile, TimeStamp, Schema}
             end,
   lists:map(LoadFun, Files).
 
 %% @doc Wraps up calls to a third party json parser.
 %% @private
-try_parse(ParseFun, SchemaBin) ->
+try_parse(JsonMedium, SchemaBin) ->
   try
-    ParseFun(SchemaBin)
+    jesse_json_medium:parse(JsonMedium, SchemaBin)
   catch
     _:Error ->
       {parse_error, Error}

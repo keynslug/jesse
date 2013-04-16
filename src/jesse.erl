@@ -41,7 +41,7 @@
 -export_type([ json_term/0
              ]).
 
--type json_term() :: term().
+-type json_term() :: jesse_json_medium:object().
 -type error()     :: {error, term()}.
 
 %%% API
@@ -55,14 +55,14 @@ add_schema(Key, Schema) ->
   jesse_database:add(Schema, ValidationFun, MakeKeyFun).
 
 %% @doc Equivalent to `add_schema/2', but `Schema' is a binary string, and
-%% the third agument is a parse function to convert the binary string to
+%% the third agument is a json medium to convert the binary string to
 %% a supported internal representation of json.
--spec add_schema( Key      :: any()
-                , Schema   :: binary()
-                , ParseFun :: fun((binary()) -> json_term())
+-spec add_schema( Key        :: any()
+                , Schema     :: binary()
+                , JsonMedium :: module()
                 ) -> ok | error().
-add_schema(Key, Schema, ParseFun) ->
-  case try_parse(ParseFun, Schema) of
+add_schema(Key, Schema, JsonMedium) ->
+  case try_parse(JsonMedium, Schema) of
     {parse_error, _} = SError -> {error, {schema_error, SError}};
     ParsedSchema              -> add_schema(Key, ParsedSchema)
   end.
@@ -76,16 +76,16 @@ del_schema(Key) ->
 
 %% @doc Loads schema definitions from filesystem to in-memory storage.
 %%
-%% Equivalent to `load_schemas(Path, ParseFun, ValidationFun, MakeKeyFun)'
+%% Equivalent to `load_schemas(Path, JsonMedium, ValidationFun, MakeKeyFun)'
 %% where `ValidationFun' is `fun jesse_json:is_json_object/1' and
 %% `MakeKeyFun' is `fun jesse_schema_validator:get_schema_id/1'. In this case
 %% the key will be the value of `id' attribute from the given schemas.
--spec load_schemas( Path     :: string()
-                  , ParseFun :: fun((binary()) -> json_term())
+-spec load_schemas( Path       :: string()
+                  , JsonMedium :: module()
                   ) -> jesse_database:update_result().
-load_schemas(Path, ParseFun) ->
+load_schemas(Path, JsonMedium) ->
   load_schemas( Path
-              , ParseFun
+              , JsonMedium
               , fun jesse_schema_validator:is_json_object/1
               , fun jesse_schema_validator:get_schema_id/1
               ).
@@ -100,19 +100,19 @@ load_schemas(Path, ParseFun) ->
 %% stored, so, during the next update timestamps will be compared to avoid
 %% unnecessary updates.
 %%
-%% Schema definitions are stored in the format which json parsing function
-%% `ParseFun' returns.
+%% Schema definitions are stored in the format which json parsing meduim
+%% returns.
 %%
 %% NOTE: it's impossible to automatically update schema definitions added by
 %%       add_schema/2, the only way to update them is to use add_schema/2
 %%       again with the new definition.
 -spec load_schemas( Path          :: string()
-                  , ParseFun      :: fun((binary()) -> json_term())
+                  , JsonMedium    :: module()
                   , ValidationFun :: fun((any()) -> boolean())
                   , MakeKeyFun    :: fun((json_term()) -> any())
                   ) -> jesse_database:update_result().
-load_schemas(Path, ParseFun, ValidationFun, MakeKeyFun) ->
-  jesse_database:update(Path, ParseFun, ValidationFun, MakeKeyFun).
+load_schemas(Path, JsonMedium, ValidationFun, MakeKeyFun) ->
+  jesse_database:update(Path, JsonMedium, ValidationFun, MakeKeyFun).
 
 %% @doc Validates json `Data' against a schema with the same key as `Schema'
 %% in the internal storage. If the given json is valid, then it is returned
@@ -130,15 +130,15 @@ validate(Schema, Data) ->
   end.
 
 %% @doc Equivalent to `validate/2', but `Data' is a binary string, and
-%% the third agument is a parse function to convert the binary string to
+%% the third agument is a json medium to convert the binary string to
 %% a supported internal representation of json.
--spec validate( Schema   :: any()
-              , Data     :: binary()
-              , ParseFun :: fun((binary()) -> json_term())
+-spec validate( Schema     :: any()
+              , Data       :: binary()
+              , JsonMedium :: module()
               ) -> {ok, json_term()}
                  | error().
-validate(Schema, Data, ParseFun) ->
-  case try_parse(ParseFun, Data) of
+validate(Schema, Data, JsonMedium) ->
+  case try_parse(JsonMedium, Data) of
     {parse_error, _} = DError -> {error, {data_error, DError}};
     ParsedJson                -> validate(Schema, ParsedJson)
   end.
@@ -159,19 +159,19 @@ validate_with_schema(Schema, Data) ->
   end.
 
 %% @doc Equivalent to `validate_with_schema/2', but both `Schema' and
-%% `Data' are binary strings, and the third arguments is a parse function
+%% `Data' are binary strings, and the third arguments is a json medium
 %% to convert the binary string to a supported internal representation of json.
--spec validate_with_schema( Schema   :: binary()
-                          , Data     :: binary()
-                          , ParseFun :: fun((binary()) -> json_term())
+-spec validate_with_schema( Schema     :: binary()
+                          , Data       :: binary()
+                          , JsonMedium :: module()
                           ) -> {ok, json_term()}
                              | error().
-validate_with_schema(Schema, Data, ParseFun) ->
-  case try_parse(ParseFun, Schema) of
+validate_with_schema(Schema, Data, JsonMedium) ->
+  case try_parse(JsonMedium, Schema) of
     {parse_error, _} = SError ->
       {error, {schema_error, SError}};
     ParsedSchema ->
-      case try_parse(ParseFun, Data) of
+      case try_parse(JsonMedium, Data) of
         {parse_error, _} = DError ->
           {error, {data_error, DError}};
         ParsedData ->
@@ -182,9 +182,9 @@ validate_with_schema(Schema, Data, ParseFun) ->
 %%% Internal functions
 %% @doc Wraps up calls to a third party json parser.
 %% @private
-try_parse(ParseFun, JsonBin) ->
+try_parse(JsonMedium, JsonBin) ->
   try
-    ParseFun(JsonBin)
+    jesse_json_medium:parse(JsonMedium, JsonBin)
   catch
     _:Error ->
       {parse_error, Error}

@@ -202,7 +202,7 @@ uniqueItems(Config) ->
 
 %%% Internal functions
 run_tests(Specs) ->
-  lists:foreach( fun(Spec) ->
+  jesse_json_medium:foreach( fun(_N, Spec) ->
                      Description = get_path(?DESCRIPTION, Spec),
                      Schema      = get_path(?SCHEMA, Spec),
                      TestSet     = get_path(?TESTS, Spec),
@@ -213,7 +213,7 @@ run_tests(Specs) ->
                ).
 
 run_test_set(Schema, TestSet) ->
-  lists:foreach( fun(Test) ->
+  jesse_json_medium:foreach( fun(_N, Test) ->
                      Description = get_path(?DESCRIPTION, Test),
                      TestData    = get_path(?DATA, Test),
                      io:format("* Test case: ~s~n", [Description]),
@@ -231,7 +231,7 @@ load_test_specs(TestsDir) ->
   FileList = filelib:wildcard(TestsDir ++ "/*.json"),
   lists:map( fun(Filename) ->
                  {ok, Bin} = file:read_file(Filename),
-                 JsonTest  = jiffy:decode(Bin),
+                 JsonTest  = jesse_json_medium:parse(jesse_json_medium_jiffy, Bin),
                  {filename_to_key(Filename), JsonTest}
              end
            , FileList
@@ -241,7 +241,7 @@ filename_to_key(Filename) ->
   filename:rootname(filename:basename(Filename)).
 
 get_path(Key, Schema) ->
-  jesse_json_path:path(Key, Schema).
+  jesse_json_medium:path(Key, Schema).
 
 %%% Local Variables:
 %%% erlang-indent-level: 2
