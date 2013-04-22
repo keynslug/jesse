@@ -20,8 +20,6 @@
 
 -export([
     parse/1,
-    path/2,
-    path/3,
     value/2,
     value/3,
     is_object/1,
@@ -31,7 +29,6 @@
 ]).
 
 -type object_key()    :: jesse_json_medium:object_key().
--type object_path()   :: jesse_json_medium:object_path().
 -type object_value()  :: jesse_json_medium:object_value().
 -type object_prop()   :: {object_key(), object_value() | object()}.
 -type object()        :: {[object_prop()]} | object_value().
@@ -41,34 +38,6 @@
 parse(Bin) ->
     jiffy:decode(Bin).
 
--spec path(binary() | object_path(), object()) -> object_value() | object() | undefined.
-
-path(Path, Object) ->
-    path(Path, Object, undefined).
-
--spec path(binary() | object_path(), object(), Default) -> object_value() | object() | Default when
-    Default :: any().
-
-path([], Result, _) ->
-    Result;
-
-path([Key | Rest], {Object = [{_, _} | _]}, Default) when is_binary(Key) ->
-    case lists:keyfind(Key, 1, Object) of
-        {Key, Result} ->
-            path(Rest, Result, Default);
-        _False ->
-            Default
-    end;
-
-path([_ | _], _Value, Default) ->
-    Default;
-
-path(Path, Object, Default) when is_binary(Path) ->
-    path(jesse_json_medium:splitpath(Path), Object, Default);
-
-path(_, _, _) ->
-    error(badarg).
-
 -spec value(object_key(), object()) -> object_value() | object() | undefined.
 
 value(Key, Object) ->
@@ -77,7 +46,7 @@ value(Key, Object) ->
 -spec value(object_key(), object(), Default) -> object_value() | object() | Default when
     Default :: any().
 
-value(Key, {Object = [{_, _}]}, Default) when is_binary(Key) ->
+value(Key, {Object = [{_, _} | _]}, Default) when is_binary(Key) ->
     case lists:keyfind(Key, 1, Object) of
         {Key, Value} ->
             Value;

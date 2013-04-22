@@ -57,15 +57,6 @@
 ).
 
 -callback(
-    path(binary() | object_path(), object()) -> object_value() | object() | undefined
-).
-
--callback(
-    path(binary() | object_path(), object(), Default) -> object_value() | object() | Default when
-        Default :: any()
-).
-
--callback(
     value(object_key(), object()) -> object_value() | object() | undefined
 ).
 
@@ -96,16 +87,28 @@ parse(Medium, Binary) ->
 
 -spec path(binary() | object_path(), object()) -> object_value() | object() | undefined.
 
-path(Path, {Medium, Object}) ->
-    Result = Medium:path(Path, Object),
-    retag(Medium, Result).
+path(Path, Object) ->
+    path(Path, Object, undefined).
 
 -spec path(binary() | object_path(), object(), Default) -> object_value() | object() | Default when
     Default :: any().
 
-path(Path, {Medium, Object}, Default) ->
-    Result = Medium:path(Path, Object, Default),
-    retag(Medium, Result).
+path([], Result, _Default) ->
+    Result;
+
+path([Key | Rest], Object, Default) ->
+    case is_object(Object) of
+        true ->
+            path(Rest, value(Key, Object), Default);
+        false ->
+            Default
+    end;
+
+path(Path, Object, Default) when is_binary(Path) ->
+    path(splitpath(Path), Object, Default);
+
+path(_, _, _) ->
+    error(badarg).
 
 -spec value(object_key(), object()) -> object_value() | object() | undefined.
 
