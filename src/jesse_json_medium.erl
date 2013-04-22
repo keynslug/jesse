@@ -17,7 +17,6 @@
 
 -module(jesse_json_medium).
 
-
 -export([
     parse/2,
     path/2,
@@ -35,8 +34,7 @@
     values/1,
     all/2,
     any/2,
-    foreach/2,
-    splitpath/1
+    foreach/2
 ]).
 
 %%
@@ -205,29 +203,14 @@ splitpath(<<>>, Buffer, Acc) ->
 splitpath(<<$., Rest/binary>>, Buffer, Acc) ->
     splitpath(Rest, <<>>, [Buffer | Acc]);
 
-splitpath(<<$%, H, L, Rest/binary>>, Buffer, Acc) ->
-    splitpath(Rest, <<Buffer/binary, (unpercent(H, L))>>, Acc);
+splitpath(<<$\\, C, Rest/binary>>, Buffer, Acc) ->
+    splitpath(Rest, <<Buffer/binary, C>>, Acc);
 
-splitpath(<<$%, _/binary>>, _Buffer, _Acc) ->
+splitpath(<<$\\>>, _Buffer, _Acc) ->
     error(badarg);
 
 splitpath(<<C, Rest/binary>>, Buffer, Acc) ->
     splitpath(Rest, <<Buffer/binary, C>>, Acc).
-
-unpercent(H, L) ->
-    fromhex(H) * 16 + fromhex(L).
-
-fromhex(D) when D >= $0, D =< $9 ->
-    D - $0;
-
-fromhex(D) when D >= $a, D =< $f ->
-    D - $a + 10;
-
-fromhex(D) when D >= $A, D =< $F ->
-    D - $A + 10;
-
-fromhex(_) ->
-    error(badarg).
 
 %%
 
