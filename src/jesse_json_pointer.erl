@@ -25,12 +25,14 @@
 
 %%
 
--spec resolve(binary(), jesse:json_term()) -> jesse:json_term() | undefined.
+-spec resolve(binary(), jesse:json_term()) ->
+    {jesse:json_term() | undefined, jesse:json_term()}.
 
 resolve(Ref, Root) ->
     resolve(Ref, Root, jesse_database).
 
--spec resolve(binary(), jesse:json_term(), module()) -> jesse:json_term() | undefined.
+-spec resolve(binary(), jesse:json_term(), module()) ->
+    {jesse:json_term() | undefined, jesse:json_term()}.
 
 resolve(Ref, Root, Resolver) when is_binary(Ref) ->
     resolve_ptr(urldecode(Ref), Root, Resolver).
@@ -38,17 +40,17 @@ resolve(Ref, Root, Resolver) when is_binary(Ref) ->
 %%
 
 resolve_ptr(<<>>, Root, _Resolver) ->
-    Root;
+    {Root, Root};
 
 resolve_ptr(<<$#, Rest/binary>>, Root, _Resolver) ->
-    jesse_json_medium:path(splitref(Rest), Root);
+    {jesse_json_medium:path(splitref(Rest), Root), Root};
 
 resolve_ptr(Ref, _Root, Resolver) ->
     case binary:split(Ref, [<<$#>>]) of
         [Ref] ->
-            resolve_resource(Ref, Resolver);
-        [Ref, Rest] ->
-            jesse_json_medium:path(splitref(Rest), resolve_resource(Ref, Resolver))
+            resolve_ptr(<<>>, resolve_resource(Ref, Resolver), Resolver);
+        [ExtRef, Rest] ->
+            resolve_ptr(<<$#, Rest/binary>>, resolve_resource(ExtRef, Resolver), Resolver)
     end.
 
 %%
