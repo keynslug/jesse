@@ -86,7 +86,7 @@ del_schema(Key) ->
 load_schemas(Path, JsonMedium) ->
   load_schemas( Path
               , JsonMedium
-              , fun jesse_schema_validator:is_json_object/1
+              , fun jesse_schema_validator:is_schema_ok/1
               , fun jesse_schema_validator:get_schema_id/1
               ).
 

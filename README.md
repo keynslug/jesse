@@ -9,7 +9,11 @@ jesse implements [Draft 03] (http://tools.ietf.org/html/draft-zyp-json-schema-03
 the specification. It supports almost all core schema definitions except:
 
 * format
-* $ref
+
+Schema $ref support is partial, jesse does not allow `id`s in subschemas and
+resolves references only upon the internal database. Thus, if you're going to use
+references, it is recommended that all schemas loaded into its internal database
+will have a schema `id`.
 
 Quick start
 -----------
