@@ -37,6 +37,10 @@
     foreach/2
 ]).
 
+-export([
+    parse_index/1
+]).
+
 %%
 
 %% Only allowed key is a binary string.
@@ -91,16 +95,11 @@ path(Path, Object) ->
 -spec path(binary() | object_path(), object(), Default) -> object_value() | object() | Default when
     Default :: any().
 
-path([], Result, _Default) ->
-    Result;
+path([Key | Rest], Object = {_Medium, _}, Default) ->
+    path(Rest, value(Key, Object), Default);
 
-path([Key | Rest], Object, Default) ->
-    case is_object(Object) of
-        true ->
-            path(Rest, value(Key, Object), Default);
-        false ->
-            Default
-    end;
+path(Rest, Result, _Default) when is_list(Rest) ->
+    Result;
 
 path(Path, Object, Default) when is_binary(Path) ->
     path(splitpath(Path), Object, Default);
@@ -183,6 +182,25 @@ names(Object) ->
 
 values(Object) ->
     lists:reverse(fold(fun (_N, Value, Acc) -> [Value | Acc] end, [], Object)).
+
+%%
+
+-spec parse_index(binary()) -> pos_integer() | badindex.
+
+parse_index(<<>>) ->
+    badindex;
+
+parse_index(Bin) ->
+    parse_index(Bin, 0).
+
+parse_index(<<>>, S) ->
+    S + 1;
+
+parse_index(<<D, Rest/binary>>, S) when D >= $0 andalso D =< $9 ->
+    parse_index(Rest, S * 10 + (D - $0));
+
+parse_index(_, _) ->
+    badindex.
 
 %%
 

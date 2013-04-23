@@ -54,6 +54,16 @@ value(Key, {Object = [{_, _} | _]}, Default) when is_binary(Key) ->
             Default
     end;
 
+value(Key, Array = [_ | _], Default) when is_binary(Key) ->
+    case jesse_json_medium:parse_index(Key) of
+        badindex ->
+            Default;
+        N when N > length(Array) ->
+            Default;
+        N ->
+            lists:nth(N, Array)
+    end;
+
 value(Key, _Value, Default) when is_binary(Key) ->
     Default;
 
