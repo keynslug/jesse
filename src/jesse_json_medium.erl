@@ -30,6 +30,7 @@
 ]).
 
 -export([
+    unwrap/1,
     names/1,
     values/1,
     all/2,
@@ -119,6 +120,11 @@ value(Path, {Medium, Object}) ->
 value(Path, {Medium, Object}, Default) ->
     Result = Medium:value(Path, Object, Default),
     retag(Medium, Result).
+
+-spec unwrap(object()) -> term().
+
+unwrap({_Medium, Object}) ->
+    Object.
 
 -spec is_object(any()) -> boolean().
 
