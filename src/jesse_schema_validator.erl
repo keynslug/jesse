@@ -110,7 +110,14 @@ have_no_nested_id(Name, Value) when Name =:= ?PROPERTIES; Name =:= ?PATTERNPROPE
       false -> true
     end end, Value);
 
-have_no_nested_id(_, Value) ->
+have_no_nested_id(Name, Value) when
+  Name =:= ?TYPE
+  ; Name =:= ?ADDITIONALPROPERTIES
+  ; Name =:= ?ITEMS
+  ; Name =:= ?ADDITIONALITEMS
+  ; Name =:= ?DEPENDENCIES
+  ; Name =:= ?DISALLOW
+  ; Name =:= ?EXTENDS ->
   case is_json_object(Value) of
     true -> jesse_json_medium:all(fun have_no_id/2, Value);
     false ->
@@ -118,7 +125,10 @@ have_no_nested_id(_, Value) ->
         true -> have_no_nested_ids(Value);
         false -> true
       end
-  end.
+  end;
+
+have_no_nested_id(_, _) ->
+  true.
 
 have_no_id(?ID, _) ->
   false;
