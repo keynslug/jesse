@@ -50,20 +50,20 @@ ok
                      {[{<<"type">>,<<"integer">>}]}}}"]")
 ```
 
-(using a callback)
+(using a json medium)
 
 ```erlang
 1> jesse:add_schema(some_key,
 1>                  <<"{\"uniqueItems\": true}">>,
-1>                  fun jiffy:decode/1).
+1>                  jesse_json_medium_jiffy).
 ok
 2> jesse:validate(some_key,
 2>                <<"[1, 2]">>,
-2>                fun jiffy:decode/1).
+2>                jesse_json_medium_jiffy).
 {ok,[1,2]}
 3> jesse:validate(some_key,
 3>                <<"[{\"foo\": \"bar\"}, {\"foo\": \"bar\"}] ">>,
-3>                fun jiffy:decode/1).
+3>                jesse_json_medium_jiffy).
 {error,{data_invalid,[{[{<<"foo">>,<<"bar">>}]},
                       {[{<<"foo">>,<<"bar">>}]}],
                      {{[{<<"foo">>,<<"bar">>}]},not_unique},
@@ -87,18 +87,18 @@ ok
 {error,{data_invalid,<<"abc">>,no_match,<<"^a*$">>}}
 ```
 
-(using a callback)
+(using a json medium)
 
 ```erlang
 1> Schema = <<"{\"patternProperties\": {\"f.*o\": {\"type\": \"integer\"}}}">>.
 <<"{\"patternProperties\": {\"f.*o\": {\"type\": \"integer\"}}}">>
 2> jesse:validate_with_schema(Schema,
 2>                            <<"{\"foo\": 1, \"foooooo\" : 2}">>,
-2>                            fun jiffy:decode/1).
+2>                            jesse_json_medium_jiffy).
 {ok,{[{<<"foo">>,1},{<<"foooooo">>,2}]}}
 3> jesse:validate_with_schema(Schema,
 3>                            <<"{\"foo\": \"bar\", \"fooooo\": 2}">>,
-3>                            fun jiffy:decode/1).
+3>                            jesse_json_medium_jiffy).
 {error,{data_invalid,<<"bar">>,not_integer,
                      {[{<<"type">>,<<"integer">>}]}}}""}]""}")
 ```
