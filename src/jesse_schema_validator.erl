@@ -93,12 +93,7 @@ is_schema_ok(Schema) ->
   end.
 
 have_no_nested_ids(Schema) ->
-  case jesse_json_medium:value(?_REF, Schema) of
-    undefined ->
-      jesse_json_medium:all(fun have_no_nested_id/2, Schema);
-    _Ref ->
-      jesse_json_medium:size(Schema) =:= 1
-  end.
+  jesse_json_medium:all(fun have_no_nested_id/2, Schema).
 
 have_no_nested_id(?ENUM, _Value) ->
   true;
